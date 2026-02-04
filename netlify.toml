@@ -1,0 +1,23 @@
+[build]
+  publish = "public"
+  functions = "functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/server/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/chat"
+  to = "/.netlify/functions/server/chat"
+  status = 200
+
+[[redirects]]
+  from = "/title"
+  to = "/.netlify/functions/server/title"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

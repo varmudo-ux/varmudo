@@ -1,0 +1,222 @@
+import express from "express";
+import OpenAI from "openai";
+import dotenv from "dotenv";
+import multer from "multer";
+import { createClient } from "@supabase/supabase-js";
+import serverless from "serverless-http";
+
+dotenv.config();
+
+const app = express();
+// Use memory storage for Netlify Functions (read-only filesystem)
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+
+// Initialize Supabase
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+
+app.use(express.json({ limit: "50mb" }));
+
+const client = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: "https://api.groq.com/openai/v1"
+});
+
+const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
+
+// Auto model selection logic
+function selectOptimalModelServer(query) {
+    const query_lower = query.toLowerCase();
+    const query_length = query.length;
+    const isCoding = /\b(code|program|debug|function|class|api|javascript|python|java|cpp|rust|go|sql|html|css|react|node|express|algorithm|git|github|bug|error|exception|variable|async|await|database|docker|kubernetes|testing|optimization|refactor|design pattern|architecture|microservices|json|xml|yaml|csv|regex)\b/i.test(query_lower);
+    const isMath = /\b(math|calculate|equation|formula|algebra|calculus|geometry|statistics|probability|matrix|vector|solve|theorem|proof|graph|data analysis|machine learning|neural network|tensorflow|pytorch|pandas|numpy)\b/i.test(query_lower);
+    const isWriting = /\b(write|essay|article|blog|story|fiction|novel|poem|grammar|spelling|edit|proofread|draft|outline|creative|literature|thesis|dissertation|academic|translate|language)\b/i.test(query_lower);
+    const isLongContext = query_length > 8000 || /\b(document|analyze|summary|extract|find in|search through|large file|entire text|full content)\b/i.test(query_lower);
+
+    if (isLongContext || isWriting) return 'openai/gpt-oss-120b';
+    if (isMath || isCoding) return 'qwen/qwen3-32b';
+    if (query_length < 200) return 'llama-3.1-8b-instant';
+    return 'llama-3.3-70b-versatile';
+}
+
+app.post("/api/generate-image", async (req, res) => {
+    try {
+        const { prompt, model = "flux", enhance = true } = req.body;
+        if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+        const seed = Math.floor(Math.random() * 2147483647);
+        let targetModel = model;
+        if (model === "bytedance-seed/seedream-4.5") targetModel = "seedream";
+
+        const url = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`);
+        url.searchParams.append("model", targetModel);
+        url.searchParams.append("seed", seed.toString());
+        url.searchParams.append("enhance", enhance.toString());
+        url.searchParams.append("nologo", "true");
+        if (POLLINATIONS_API_KEY) url.searchParams.append("key", POLLINATIONS_API_KEY);
+
+        res.json({ imageUrl: url.toString() });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post("/chat", async (req, res) => {
+    const { messages, model, temperature, max_tokens } = req.body;
+    res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
+    });
+
+    try {
+        let modelId = model || "llama-3.3-70b-versatile";
+        if (!modelId || modelId.includes('mixtral') || modelId.includes('gemma-7b') || modelId.includes('llama3-')) {
+            modelId = 'llama-3.3-70b-versatile';
+        }
+
+        const hasImages = messages.some(m =>
+            Array.isArray(m.content) && m.content.some(c => c.type === 'image_url') || (m.image_url)
+        );
+
+        if (hasImages) {
+            modelId = "llama-3.2-11b-vision-preview";
+        } else if (modelId === 'auto' && messages && messages.length > 0) {
+            const lastUserMessage = messages.slice().reverse().find(m => m.role === 'user');
+            if (lastUserMessage) {
+                const query = typeof lastUserMessage.content === 'string'
+                    ? lastUserMessage.content
+                    : (Array.isArray(lastUserMessage.content) ? lastUserMessage.content.map(c => c.text || '').join(' ') : '');
+                modelId = selectOptimalModelServer(query);
+            }
+        }
+
+        const normalizedMessages = messages.map(m => {
+            if (m.image_url && !Array.isArray(m.content)) {
+                return {
+                    role: m.role,
+                    content: [
+                        { type: "text", text: m.content || "" },
+                        { type: "image_url", image_url: { url: m.image_url } }
+                    ]
+                };
+            }
+            if (Array.isArray(m.content)) {
+                return { role: m.role, content: m.content.filter(item => item && (item.type === 'text' || item.type === 'image_url')) };
+            }
+            return { role: m.role, content: String(m.content || "") };
+        });
+
+        const stream = await client.chat.completions.create({
+            model: modelId,
+            messages: normalizedMessages,
+            stream: true,
+            temperature: parseFloat(temperature) || 0.7,
+            max_tokens: Math.min(parseInt(max_tokens) || 4096, 4096),
+        });
+
+        for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content || "";
+            if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.end();
+    } catch (error) {
+        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+        res.end();
+    }
+});
+
+app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: "No audio file uploaded" });
+
+        const transcription = await client.audio.transcriptions.create({
+            file: new File([req.file.buffer], "recording.webm", { type: "audio/webm" }),
+            model: "distil-whisper-large-v3-en",
+        });
+
+        res.json({ text: transcription.text });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post("/title", async (req, res) => {
+    try {
+        const { content, chat_id } = req.body;
+        const completion = await client.chat.completions.create({
+            model: "llama-3.1-8b-instant",
+            messages: [
+                { role: "system", content: "Role: Professional chat titler. Return ONLY a 1-5 word title in Title Case." },
+                { role: "user", content: content }
+            ],
+            max_tokens: 25,
+            temperature: 0.3
+        });
+        let title = completion.choices[0].message.content.trim().replace(/^["']|["']$/g, '').replace(/\.+$/, '');
+        if (chat_id && supabase) await supabase.from('chats').update({ title }).eq('id', chat_id);
+        res.json({ title });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get("/api/chats", async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: "Supabase not configured" });
+    const { data, error } = await supabase.from('chats').select('*').order('updated_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+app.get("/api/chats/:id/messages", async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: "Supabase not configured" });
+    const { data, error } = await supabase.from('messages').select('*').eq('chat_id', req.params.id).order('created_at', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+app.post("/api/chats", async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: "Supabase not configured" });
+    const { title, model, system_prompt, temperature, max_tokens } = req.body;
+    const { data, error } = await supabase.from('chats').insert([{ title: title || "New Chat", model, system_prompt, temperature, max_tokens }]).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+app.post("/api/messages", async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: "Supabase not configured" });
+    const { chat_id, role, content, image_url } = req.body;
+    const { data, error } = await supabase.from('messages').insert([{ chat_id, role, content, image_url }]).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    await supabase.from('chats').update({ updated_at: new Date() }).eq('id', chat_id);
+    res.json(data);
+});
+
+app.delete("/api/chats/:id", async (req, res) => {
+    if (!supabase) return res.status(503).json({ error: "Supabase not configured" });
+    const { error } = await supabase.from('chats').delete().eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+});
+
+app.get("/api/suggestions", async (req, res) => {
+    try {
+        const completion = await client.chat.completions.create({
+            model: "llama-3.1-8b-instant",
+            messages: [{ role: "system", content: "Generate 4 diverse, short prompt suggestions. Return JSON: {\"suggestions\": [{\"title\": \"Title\", \"text\": \"Prompt text\"}]}" }],
+            response_format: { type: "json_object" }
+        });
+        const data = JSON.parse(completion.choices[0].message.content);
+        res.json(data.suggestions || data);
+    } catch (error) {
+        res.json([
+            { title: "Explain concepts", text: "Explain quantum computing like I'm five" },
+            { title: "Write code", text: "Write a Python script to scrape a website" }
+        ]);
+    }
+});
+
+// Export the handler for Netlify
+export const handler = serverless(app);
