@@ -19,9 +19,20 @@ const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supaba
 
 app.use(express.json({ limit: "50mb" }));
 
-// Request Logger for Debugging
+// Request Logger & Body Recovery for Netlify
 app.use((req, res, next) => {
     console.log(`[DEBUG] ${req.method} ${req.url}`);
+    console.log(`[DEBUG] Headers:`, JSON.stringify(req.headers));
+
+    // If body is empty but there is raw data (common in some serverless wrappers)
+    if (req.body && Object.keys(req.body).length === 0 && req.rawBody) {
+        try {
+            req.body = JSON.parse(req.rawBody);
+            console.log("[DEBUG] Recovered body from rawBody");
+        } catch (e) {
+            console.error("[ERROR] Failed to parse rawBody:", e.message);
+        }
+    }
     next();
 });
 
