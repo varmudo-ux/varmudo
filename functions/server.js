@@ -113,7 +113,13 @@ app.post("/api/generate-image", async (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-    const { messages, model, temperature, max_tokens, stream: shouldStream = true } = req.body;
+    console.log("[DEBUG] Chat Request Body:", JSON.stringify(req.body));
+    const { messages, model, temperature, max_tokens, stream: shouldStream = true } = req.body || {};
+
+    if (!messages || !Array.isArray(messages)) {
+        console.error("[ERROR] Missing or invalid messages in request body");
+        return res.status(400).json({ error: "Messages are required and must be an array." });
+    }
 
     try {
         let modelId = model || "llama-3.3-70b-versatile";
