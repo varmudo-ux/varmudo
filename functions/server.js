@@ -17,6 +17,14 @@ const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE
 const supabaseKey = process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
+app.use(express.json({ limit: "50mb" }));
+
+// Request Logger for Debugging
+app.use((req, res, next) => {
+    console.log(`[DEBUG] ${req.method} ${req.url}`);
+    next();
+});
+
 const getOpenAIClient = () => {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {

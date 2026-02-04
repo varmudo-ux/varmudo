@@ -333,7 +333,8 @@ async function streamResponse(userText, userImage, chatId) {
 
     } catch (err) {
         console.error("Stream error", err);
-        contentDiv.innerHTML += "<br>[Error generating response]";
+        alert("Server Error: " + err.message);
+        contentDiv.innerHTML += `<br>[Error: ${err.message}]`;
     } finally {
         isGenerating = false;
         abortController = null;
