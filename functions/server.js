@@ -50,10 +50,14 @@ app.get("/api/health", (req, res) => {
     res.json({
         status: "ok",
         timestamp: new Date().toISOString(),
+        env_keys_detected: Object.keys(process.env).filter(key =>
+            ['GROQ_API_KEY', 'SUPABASE_URL', 'SUPABASE_KEY', 'POLLINATIONS_API_KEY', 'PORT', 'NODE_ENV'].includes(key)
+        ),
         env: {
             hasGroqKey: !!process.env.GROQ_API_KEY,
             hasSupabase: !!process.env.SUPABASE_URL && !!process.env.SUPABASE_KEY
-        }
+        },
+        node_version: process.version
     });
 });
 
