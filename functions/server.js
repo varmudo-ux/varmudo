@@ -55,10 +55,32 @@ app.get("/api/health", (req, res) => {
         ),
         env: {
             hasGroqKey: !!process.env.GROQ_API_KEY,
-            hasSupabase: !!process.env.SUPABASE_URL && !!process.env.SUPABASE_KEY
+            hasSupabase: !!process.env.SUPABASE_URL && !!process.env.SUPABASE_KEY,
+            hasPollinationsKey: !!process.env.POLLINATIONS_API_KEY
         },
         node_version: process.version
     });
+});
+
+// Simple AI test (Non-streaming)
+app.get("/api/test-ai", async (req, res) => {
+    try {
+        console.log("Testing AI connection...");
+        const client = getOpenAIClient();
+        const completion = await client.chat.completions.create({
+            model: "llama-3.1-8b-instant",
+            messages: [{ role: "user", content: "Say 'Connection successful' if you can read this." }],
+            max_tokens: 20
+        });
+        res.json({
+            success: true,
+            response: completion.choices[0].message.content,
+            model: completion.model
+        });
+    } catch (error) {
+        console.error("AI Test Error:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 app.post("/api/generate-image", async (req, res) => {
