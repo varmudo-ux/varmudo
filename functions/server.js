@@ -162,7 +162,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 app.post("/title", async (req, res) => {
     try {
         const { content, chat_id } = req.body;
-        const completion = await client.chat.completions.create({
+        const completion = await getOpenAIClient().chat.completions.create({
             model: "llama-3.1-8b-instant",
             messages: [
                 { role: "system", content: "Role: Professional chat titler. Return ONLY a 1-5 word title in Title Case." },
@@ -219,7 +219,7 @@ app.delete("/api/chats/:id", async (req, res) => {
 
 app.get("/api/suggestions", async (req, res) => {
     try {
-        const completion = await client.chat.completions.create({
+        const completion = await getOpenAIClient().chat.completions.create({
             model: "llama-3.1-8b-instant",
             messages: [{ role: "system", content: "Generate 4 diverse, short prompt suggestions. Return JSON: {\"suggestions\": [{\"title\": \"Title\", \"text\": \"Prompt text\"}]}" }],
             response_format: { type: "json_object" }
