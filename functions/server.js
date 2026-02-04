@@ -41,6 +41,18 @@ function selectOptimalModelServer(query) {
     return 'llama-3.3-70b-versatile';
 }
 
+// Health check and diagnostics
+app.get("/api/health", (req, res) => {
+    res.json({
+        status: "ok",
+        timestamp: new Date().toISOString(),
+        env: {
+            hasGroqKey: !!process.env.GROQ_API_KEY,
+            hasSupabase: !!process.env.SUPABASE_URL && !!process.env.SUPABASE_KEY
+        }
+    });
+});
+
 app.post("/api/generate-image", async (req, res) => {
     try {
         const { prompt, model = "flux", enhance = true } = req.body;
