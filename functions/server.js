@@ -22,16 +22,24 @@ app.use(express.json({ limit: "50mb" }));
 // Request Logger & Body Recovery for Netlify
 app.use((req, res, next) => {
     console.log(`[DEBUG] ${req.method} ${req.url}`);
-    console.log(`[DEBUG] Headers:`, JSON.stringify(req.headers));
 
-    // If body is empty but there is raw data (common in some serverless wrappers)
-    if (req.body && Object.keys(req.body).length === 0 && req.rawBody) {
+    // Recovery for Buffer-wrapped bodies (Netlify specific)
+    if (req.body && req.body.type === 'Buffer' && Array.isArray(req.body.data)) {
+        try {
+            const raw = Buffer.from(req.body.data).toString();
+            req.body = JSON.parse(raw);
+            console.log("[DEBUG] Successfully recovered body from Buffer object");
+        } catch (e) {
+            console.error("[ERROR] Failed to recover Buffer body:", e.message);
+        }
+    }
+
+    // Alternative recovery from rawBody
+    if ((!req.body || Object.keys(req.body).length === 0) && req.rawBody) {
         try {
             req.body = JSON.parse(req.rawBody);
             console.log("[DEBUG] Recovered body from rawBody");
-        } catch (e) {
-            console.error("[ERROR] Failed to parse rawBody:", e.message);
-        }
+        } catch (e) { }
     }
     next();
 });
