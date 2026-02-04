@@ -17,12 +17,16 @@ const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE
 const supabaseKey = process.env.SUPABASE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
-app.use(express.json({ limit: "50mb" }));
-
-const client = new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: "https://api.groq.com/openai/v1"
-});
+const getOpenAIClient = () => {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+        throw new Error("Missing GROQ_API_KEY environment variable in Netlify Site Settings.");
+    }
+    return new OpenAI({
+        apiKey: apiKey,
+        baseURL: "https://api.groq.com/openai/v1"
+    });
+};
 
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 
@@ -120,7 +124,7 @@ app.post("/chat", async (req, res) => {
             return { role: m.role, content: String(m.content || "") };
         });
 
-        const stream = await client.chat.completions.create({
+        const stream = await getOpenAIClient().chat.completions.create({
             model: modelId,
             messages: normalizedMessages,
             stream: true,
@@ -144,7 +148,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: "No audio file uploaded" });
 
-        const transcription = await client.audio.transcriptions.create({
+        const transcription = await getOpenAIClient().audio.transcriptions.create({
             file: new File([req.file.buffer], "recording.webm", { type: "audio/webm" }),
             model: "distil-whisper-large-v3-en",
         });
